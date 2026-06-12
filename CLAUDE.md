@@ -1,4 +1,7 @@
-# CLAUDE.md — CEO Content Review Agent
+# CLAUDE.md — BlogReviewAgent
+
+## App Name
+This app is called **BlogReviewAgent**. Always use this name in commit messages, comments, and documentation. Never use "ReviewDesk", "CEO Review Agent", or any other name.
 
 ## What This Project Is
 
