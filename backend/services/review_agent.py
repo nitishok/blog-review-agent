@@ -1,6 +1,16 @@
+"""
+review_agent.py — Generate redline suggestions using Claude.
+
+Uses prompt caching on the system prompt (style guide) so repeated calls
+for different tickets in the same queue pass are fast and cheap.
+"""
+
 import asyncio
+import json
 import os
+import re
 from pathlib import Path
+from typing import Optional
 
 import anthropic
 
@@ -9,7 +19,7 @@ from services.jira import get_review_queue, get_sharepoint_url
 from services.sharepoint import fetch_docx
 
 # In-memory cache: ticket_id -> review result
-_review_cache: dict[str, dict] = {}
+_review_cache: dict = {}
 
 STYLE_FILE = Path(__file__).parent.parent.parent / "review-style.md"
 
@@ -17,44 +27,57 @@ STYLE_FILE = Path(__file__).parent.parent.parent / "review-style.md"
 def _load_style() -> str:
     if STYLE_FILE.exists():
         return STYLE_FILE.read_text(encoding="utf-8")
-    return ""
+    return "(No style guide found — apply general editorial judgment.)"
 
 
-def generate_review(doc_text: str, ticket_context: dict) -> list[dict]:
+def _infer_content_type(ticket_summary: str) -> str:
+    """Extract content type from ticket summary prefix e.g. [Blog], [Email]."""
+    match = re.match(r'\[([^\]]+)\]', ticket_summary or "")
+    return match.group(1) if match else "marketing content"
+
+
+def generate_review(doc_text: str, ticket_context: dict) -> list:
     """
     Call Claude to generate redline suggestions for a document.
 
+    Uses prompt caching on the system prompt block (style guide) so the
+    cache block is reused across all tickets reviewed in the same session.
+
     Returns list of:
-    {
-        "original_text": str,
-        "suggestion": str,
-        "rationale": str,
-    }
+        {
+            "original_text": str,   # exact phrase from the document
+            "suggestion":    str,   # improved version
+            "rationale":     str,   # one sentence explaining why
+        }
     """
     style = _load_style()
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
-    system_prompt = f"""You are the CEO of an Appian-focused IT services company reviewing marketing content.
-Your job is to redline this content based on your established review style.
+    content_type = _infer_content_type(ticket_context.get("summary", ""))
+
+    system_prompt_text = f"""You are the CEO of Princeton Blue, an Appian-focused IT services company, \
+reviewing marketing content before publication.
+
+Your job is to redline this content so it sounds like you wrote it — not the marketing team.
+Apply your review style ruthlessly but selectively (3–8 changes per document).
 
 ## Your Review Style
 {style}
 
-## Instructions
-Analyze the document and return a JSON array of suggested changes. Each change must be:
+## Output Format
+Return ONLY a JSON array. No prose, no markdown fences. Each element:
 {{
-  "original_text": "exact phrase or sentence from the document",
-  "suggestion": "your improved version",
-  "rationale": "one sentence explaining why"
+  "original_text": "exact phrase or sentence copied verbatim from the document",
+  "suggestion": "your improved version of that phrase",
+  "rationale": "one sentence — why this change makes it stronger"
 }}
 
-Only flag changes that meaningfully improve the content. Be selective — 3 to 8 changes per document.
-Return ONLY the JSON array, no other text."""
+If the document is strong and needs fewer than 3 changes, return fewer. \
+Never invent changes just to meet a quota."""
 
-    user_prompt = f"""Content type: {ticket_context.get('content_type', 'marketing content')}
-Target audience: {ticket_context.get('audience', 'business executives')}
-Campaign: {ticket_context.get('campaign', 'N/A')}
+    user_prompt = f"""Content type: {content_type}
+Ticket: {ticket_context.get('id', 'N/A')} — {ticket_context.get('summary', '')}
 
 ---
 
@@ -63,22 +86,38 @@ Campaign: {ticket_context.get('campaign', 'N/A')}
     message = client.messages.create(
         model=model,
         max_tokens=2048,
+        system=[
+            {
+                "type": "text",
+                "text": system_prompt_text,
+                # Cache the style guide — same across all tickets in a session
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
         messages=[{"role": "user", "content": user_prompt}],
-        system=system_prompt,
     )
 
-    import json
+    # Log cache performance
+    usage = message.usage
+    cache_read = getattr(usage, "cache_read_input_tokens", 0)
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0)
+    print(
+        f"[review_agent] tokens — input: {usage.input_tokens}, "
+        f"output: {usage.output_tokens}, "
+        f"cache_write: {cache_write}, cache_read: {cache_read}"
+    )
+
     raw = message.content[0].text.strip()
-    # Strip markdown code fences if present
+    # Strip markdown code fences if model adds them despite instructions
     if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+
     return json.loads(raw.strip())
 
 
 async def pregenerate_queue():
-    """Eagerly pre-generate reviews for all tickets in the CEO Review queue."""
+    """Eagerly pre-generate reviews for all tickets in the review queue."""
     try:
         tickets = get_review_queue()
         for ticket in tickets:
@@ -109,7 +148,7 @@ async def _pregenerate_ticket(ticket_id: str, ticket: dict):
         _review_cache[ticket_id] = {"error": str(e)}
 
 
-def get_cached_review(ticket_id: str) -> dict | None:
+def get_cached_review(ticket_id: str) -> Optional[dict]:
     return _review_cache.get(ticket_id)
 
 
