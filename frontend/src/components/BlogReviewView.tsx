@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { approve, Review } from "../api";
+import AlignedReviewPane from "./AlignedReviewPane";
 import ApproveBar from "./ApproveBar";
-import OriginalPane from "./OriginalPane";
-import SplitPane from "./SplitPane";
-import SuggestedPane from "./SuggestedPane";
 import TopBar from "./TopBar";
 
 export interface SuggestionState {
@@ -75,18 +73,13 @@ export default function BlogReviewView({ review, onBack }: Props) {
       />
 
       <div className="review-body">
-        <SplitPane
-          left={<OriginalPane text={review.original_text} />}
-          right={
-            <SuggestedPane
-              text={review.original_text}
-              suggestions={suggestions}
-              onUpdate={updateSuggestion}
-              onAccept={acceptSuggestion}
-              onReject={rejectSuggestion}
-              onUndo={undoSuggestion}
-            />
-          }
+        <AlignedReviewPane
+          text={review.original_text}
+          suggestions={suggestions}
+          onUpdate={updateSuggestion}
+          onAccept={acceptSuggestion}
+          onReject={rejectSuggestion}
+          onUndo={undoSuggestion}
         />
       </div>
 
