@@ -11,6 +11,21 @@ An AI-powered dashboard that emulates the CEO of an Appian-focused IT services c
 
 ---
 
+## AI Review Perspective
+
+**All AI-generated review suggestions must be purely from a marketing perspective.**
+
+The agent should evaluate and improve content based on:
+- Clarity, tone, and persuasiveness for a B2B IT services audience
+- Brand voice consistency and messaging alignment
+- Call-to-action strength and lead-generation effectiveness
+- SEO-friendliness and keyword relevance for Appian-focused content
+- Readability and engagement (headlines, structure, paragraph length)
+
+The agent must **not** provide technical accuracy reviews, architectural critiques, or product management feedback. Stay in the marketing lane.
+
+---
+
 ## How It Works
 
 1. JIRA tickets with `status = "CEO Review"` populate the dashboard queue
