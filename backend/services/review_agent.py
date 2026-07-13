@@ -22,12 +22,39 @@ from services.sharepoint import fetch_docx
 _review_cache: dict = {}
 
 STYLE_FILE = Path(__file__).parent.parent.parent / "review-style.md"
+KB_DIR = Path(__file__).parent.parent.parent / "knowledge-base"
+
+# Ordered benchmark files to include in system prompt (analysis only, not per-post snapshots)
+_KB_FILES = [
+    "01-content-themes.md",
+    "02-tone-and-voice.md",
+    "03-structure-patterns.md",
+    "04-title-formulas.md",
+    "05-storytelling-devices.md",
+    "06-cta-patterns.md",
+    "07-brand-positioning.md",
+    "08-seo-signals.md",
+    "09-strengths.md",
+    "10-gaps-and-opportunities.md",
+]
 
 
 def _load_style() -> str:
     if STYLE_FILE.exists():
         return STYLE_FILE.read_text(encoding="utf-8")
     return "(No style guide found — apply general editorial judgment.)"
+
+
+def _load_knowledge_base() -> str:
+    """Load synthesized marketing benchmark files from knowledge-base/."""
+    sections = []
+    for fname in _KB_FILES:
+        fpath = KB_DIR / fname
+        if fpath.exists():
+            sections.append(fpath.read_text(encoding="utf-8").strip())
+    if not sections:
+        return "(No marketing knowledge base found.)"
+    return "\n\n---\n\n".join(sections)
 
 
 def _infer_content_type(ticket_summary: str) -> str:
@@ -51,30 +78,46 @@ def generate_review(doc_text: str, ticket_context: dict) -> list:
         }
     """
     style = _load_style()
+    kb = _load_knowledge_base()
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     model = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
     content_type = _infer_content_type(ticket_context.get("summary", ""))
 
-    system_prompt_text = f"""You are the CEO of Princeton Blue, an Appian-focused IT services company, \
-reviewing marketing content before publication.
+    system_prompt_text = f"""You are a senior marketing reviewer at Princeton Blue, an Appian-focused IT \
+services company specialising in life sciences (pharma, biotech, CRO) process automation.
 
-Your job is to redline this content so it sounds like you wrote it — not the marketing team.
-Apply your review style ruthlessly but selectively (3–8 changes per document).
+Your job is to review marketing content **purely from a marketing perspective** — not technical, \
+not product management, not executive voice. Evaluate and improve content based on:
+- Clarity, tone, and persuasiveness for a B2B life sciences audience
+- Alignment with Princeton Blue's established brand voice and positioning
+- Strength of the opening hook and narrative arc
+- Call-to-action effectiveness and lead-generation potential
+- SEO relevance for Appian + life sciences keywords
+- Readability: headline quality, paragraph length, scanability
 
-## Your Review Style
+Apply 3–8 targeted redline suggestions per document. Be selective — only flag changes that \
+meaningfully improve the marketing impact.
+
+## Princeton Blue Style Guide
 {style}
+
+## Princeton Blue Marketing Benchmark
+The following is a synthesized analysis of Princeton Blue's top 30 published blogs. \
+Use this as your benchmark for what "good" looks like for this brand — what patterns to \
+reinforce, what gaps to address, and what quality bar to hold new content to.
+
+{kb}
 
 ## Output Format
 Return ONLY a JSON array. No prose, no markdown fences. Each element:
 {{
   "original_text": "exact phrase or sentence copied verbatim from the document",
   "suggestion": "your improved version of that phrase",
-  "rationale": "one sentence — why this change makes it stronger"
+  "rationale": "one sentence — why this change improves the marketing impact"
 }}
 
-If the document is strong and needs fewer than 3 changes, return fewer. \
-Never invent changes just to meet a quota."""
+If the document is already strong in an area, skip it. Never invent changes to meet a quota."""
 
     user_prompt = f"""Content type: {content_type}
 Ticket: {ticket_context.get('id', 'N/A')} — {ticket_context.get('summary', '')}
