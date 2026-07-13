@@ -25,24 +25,28 @@ export default function SuggestedPane({ text, suggestions, onUpdate, onAccept, o
 
   const renderParaText = (para: string, match: { suggestion: SuggestionState; index: number } | null) => {
     if (!match) return <>{para}</>;
-    const { suggestion, index } = match;
+    const { suggestion } = match;
     const { original_text, suggestion: suggestedText, status } = suggestion;
 
     const before = para.slice(0, para.indexOf(original_text));
     const after  = para.slice(para.indexOf(original_text) + original_text.length);
 
-    const highlightClass = status === "rejected"
-      ? "suggestion-text rejected"
-      : status === "accepted"
-      ? "suggestion-text accepted"
-      : "suggestion-text pending";
-
+    // Always show both sides: original in red strikethrough, suggestion in green underline.
+    // Rejected = hide the suggestion (original text stands). Accepted = dim the red side.
     return (
       <>
         {before}
-        <span className={highlightClass}>
-          {status === "rejected" ? original_text : suggestedText}
+        <span className={`redline-del${status === "accepted" ? " accepted" : ""}`}>
+          {original_text}
         </span>
+        {status !== "rejected" && (
+          <>
+            {" "}
+            <span className={`redline-ins${status === "accepted" ? " accepted" : ""}`}>
+              {suggestedText}
+            </span>
+          </>
+        )}
         {after}
       </>
     );

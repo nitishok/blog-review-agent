@@ -37,9 +37,27 @@ _COMMENTS_REL_TYPE = (
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def extract_text(docx_bytes: bytes) -> str:
-    """Extract full text from a .docx file, preserving paragraph breaks."""
+    """
+    Extract original text from a .docx, preserving paragraph breaks.
+    Skips runs coloured 00B050 (green) — those are our inserted suggestions
+    so the extracted text reflects the pre-redline content even when the
+    SharePoint document already has our visual redlines applied.
+    """
     doc = Document(io.BytesIO(docx_bytes))
-    return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    paras = []
+    for p in doc.paragraphs:
+        parts = []
+        for run in p.runs:
+            rPr = run._r.find(qn("w:rPr"))
+            if rPr is not None:
+                color_el = rPr.find(qn("w:color"))
+                if color_el is not None and color_el.get(qn("w:val"), "").upper() == "00B050":
+                    continue  # skip our inserted suggestion text
+            parts.append(run.text)
+        text = "".join(parts).strip()
+        if text:
+            paras.append(text)
+    return "\n\n".join(paras)
 
 
 def extract_paragraphs(docx_bytes: bytes) -> list:

@@ -10,7 +10,7 @@ interface Props {
 }
 
 export default function CommentBubble({ suggestion, index, onUpdate, onAccept, onReject, onUndo }: Props) {
-  const { status, suggestion: text, rationale, original_text } = suggestion;
+  const { status, suggestion: text, rationale } = suggestion;
 
   return (
     <div className={`comment-bubble status-${status}`}>
@@ -21,8 +21,9 @@ export default function CommentBubble({ suggestion, index, onUpdate, onAccept, o
           <textarea
             className="bubble-edit"
             value={text}
-            rows={3}
+            rows={2}
             onChange={e => onUpdate(index, e.target.value)}
+            placeholder="Edit suggestion…"
           />
           <div className="bubble-actions">
             <button className="bubble-accept" onClick={() => onAccept(index)}>✓ Accept</button>

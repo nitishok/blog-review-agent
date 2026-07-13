@@ -11,7 +11,10 @@ async def get_review(ticket_id: str):
     if cached is None:
         raise HTTPException(status_code=404, detail="Review not ready yet")
     if "error" in cached:
-        raise HTTPException(status_code=500, detail=cached["error"])
+        # Clear the error so pre-generation retries on next startup
+        from services.review_agent import invalidate_cache
+        invalidate_cache(ticket_id)
+        raise HTTPException(status_code=404, detail="Review not ready yet")
     return {
         "ticket_id": ticket_id,
         "ticket": cached["ticket"],
