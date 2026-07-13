@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { getReview, Review, Ticket } from "./api";
+import BlogReviewView from "./components/BlogReviewView";
 import Queue from "./components/Queue";
-import ReviewPane from "./components/ReviewPane";
 import "./App.css";
 
 export default function App() {
@@ -14,7 +14,6 @@ export default function App() {
     setSelectedTicket(ticket);
     setReview(null);
     setReviewError(null);
-    if (!ticket.review_ready) return;
     setLoadingReview(true);
     try {
       const r = await getReview(ticket.id);
@@ -26,32 +25,35 @@ export default function App() {
     }
   };
 
-  const handleApproved = () => {
+  const handleBack = () => {
     setSelectedTicket(null);
     setReview(null);
+    setReviewError(null);
   };
+
+  if (review) {
+    return <BlogReviewView review={review} onBack={handleBack} />;
+  }
 
   return (
     <div className="app">
       <aside className="sidebar">
-        <h1 className="app-title">CEO Review Queue</h1>
+        <h1 className="app-title">Marketing Review Queue</h1>
         <Queue onSelect={handleSelectTicket} selectedId={selectedTicket?.id ?? null} />
       </aside>
 
       <main className="main-content">
         {!selectedTicket && (
-          <div className="empty-state">Select a ticket to review</div>
+          <div className="empty-state">Select a blog ticket to review</div>
         )}
-        {selectedTicket && !review && !loadingReview && (
-          <div className="empty-state">
-            {reviewError
-              ? `Error: ${reviewError}`
-              : "Review is being generated, check back in a moment..."}
-          </div>
+        {selectedTicket && loadingReview && (
+          <div className="empty-state">Loading review…</div>
         )}
-        {loadingReview && <div className="empty-state">Loading review...</div>}
-        {review && (
-          <ReviewPane review={review} onApproved={handleApproved} />
+        {selectedTicket && !loadingReview && reviewError && (
+          <div className="empty-state error-state">Error: {reviewError}</div>
+        )}
+        {selectedTicket && !loadingReview && !reviewError && !review && (
+          <div className="empty-state">Review is being generated, check back in a moment…</div>
         )}
       </main>
     </div>

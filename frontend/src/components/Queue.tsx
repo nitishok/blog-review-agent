@@ -13,7 +13,7 @@ export default function Queue({ onSelect, selectedId }: Props) {
   useEffect(() => {
     const load = () =>
       getQueue()
-        .then(setTickets)
+        .then(all => setTickets(all.filter(t => t.summary.toLowerCase().includes("blog"))))
         .finally(() => setLoading(false));
     load();
     const interval = setInterval(load, 15000);
@@ -22,7 +22,7 @@ export default function Queue({ onSelect, selectedId }: Props) {
 
   if (loading) return <div className="queue-loading">Loading queue...</div>;
   if (tickets.length === 0)
-    return <div className="queue-empty">No tickets in CEO Review</div>;
+    return <div className="queue-empty">No blog posts pending review</div>;
 
   return (
     <ul className="queue-list">
