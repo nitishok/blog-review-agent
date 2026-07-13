@@ -100,7 +100,7 @@ def write_redlines(
 
     comments_root = _ensure_comments_part(doc)
     comment_id  = _next_comment_id(comments_root)
-    revision_id = 1000  # start high to avoid clashing with any existing revision IDs
+    revision_id = _next_revision_id(doc)  # scan doc to avoid ID collisions
 
     for suggestion in suggestions:
         original      = suggestion.get("original_text", "").strip()
@@ -195,7 +195,11 @@ def _insert_tracked_change(para, original_text, suggestion_text, cid, rev_id, au
     cstart.set(qn("w:id"), str(cid))
     cend = etree.Element(qn("w:commentRangeEnd"))
     cend.set(qn("w:id"), str(cid))
+    # Word Online requires rStyle="CommentReference" on the reference run
     cref_run = etree.Element(qn("w:r"))
+    cref_rPr = etree.SubElement(cref_run, qn("w:rPr"))
+    cref_rStyle = etree.SubElement(cref_rPr, qn("w:rStyle"))
+    cref_rStyle.set(qn("w:val"), "CommentReference")
     cref = etree.SubElement(cref_run, qn("w:commentReference"))
     cref.set(qn("w:id"), str(cid))
 
@@ -314,6 +318,18 @@ def _flush_comments_part(doc: Document, root):
     part._blob = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
+def _next_revision_id(doc: Document) -> int:
+    """Return a revision ID safely above any existing w:del/w:ins IDs in the document."""
+    max_id = 0
+    for elem in doc.element.body.iter():
+        if elem.tag in (qn("w:del"), qn("w:ins")):
+            try:
+                max_id = max(max_id, int(elem.get(qn("w:id"), 0)))
+            except (ValueError, TypeError):
+                pass
+    return max_id + 1
+
+
 def _next_comment_id(comments_root) -> int:
     existing = comments_root.findall(f"{{{_W_NS}}}comment")
     if not existing:
@@ -322,13 +338,36 @@ def _next_comment_id(comments_root) -> int:
 
 
 def _append_comment_element(root, cid: int, author: str, date: str, text: str):
-    comment = etree.SubElement(root, f"{{{_W_NS}}}comment")
-    comment.set(f"{{{_W_NS}}}id",     str(cid))
-    comment.set(f"{{{_W_NS}}}author", author)
-    comment.set(f"{{{_W_NS}}}date",   date)
-    p = etree.SubElement(comment, f"{{{_W_NS}}}p")
-    r = etree.SubElement(p, f"{{{_W_NS}}}r")
-    t = etree.SubElement(r, f"{{{_W_NS}}}t")
+    """
+    Build a comment element compatible with Word Online.
+    Requires: w:pStyle="CommentText", w:annotationRef run,
+              w:rStyle="CommentReference" on the annotation run,
+              and w:initials on the comment element.
+    """
+    W = _W_NS
+    comment = etree.SubElement(root, f"{{{W}}}comment")
+    comment.set(f"{{{W}}}id",       str(cid))
+    comment.set(f"{{{W}}}author",   author)
+    comment.set(f"{{{W}}}date",     date)
+    comment.set(f"{{{W}}}initials", "BRA")
+
+    p = etree.SubElement(comment, f"{{{W}}}p")
+
+    # Paragraph style required by Word Online
+    pPr = etree.SubElement(p, f"{{{W}}}pPr")
+    pStyle = etree.SubElement(pPr, f"{{{W}}}pStyle")
+    pStyle.set(f"{{{W}}}val", "CommentText")
+
+    # Annotation reference run (required marker before comment body)
+    ann_r = etree.SubElement(p, f"{{{W}}}r")
+    ann_rPr = etree.SubElement(ann_r, f"{{{W}}}rPr")
+    ann_rStyle = etree.SubElement(ann_rPr, f"{{{W}}}rStyle")
+    ann_rStyle.set(f"{{{W}}}val", "CommentReference")
+    etree.SubElement(ann_r, f"{{{W}}}annotationRef")
+
+    # Comment body text
+    text_r = etree.SubElement(p, f"{{{W}}}r")
+    t = etree.SubElement(text_r, f"{{{W}}}t")
     t.set(_XML_SPACE, "preserve")
     t.text = text
 
