@@ -19,6 +19,7 @@ async def get_review(ticket_id: str):
         "ticket_id": ticket_id,
         "ticket": cached["ticket"],
         "original_text": cached["original_text"],
+        "blocks": cached.get("blocks", []),
         "suggestions": cached["suggestions"],
         "sharepoint_url": cached["sharepoint_url"],
     }

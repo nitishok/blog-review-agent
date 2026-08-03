@@ -26,7 +26,7 @@ async def approve(req: ApproveRequest):
         raise HTTPException(status_code=404, detail="No cached review found")
 
     # Write suggestions as Word comments into the doc
-    updated_docx = write_comments(cached["docx_bytes"], req.final_suggestions)
+    updated_docx = write_comments(cached["docx_bytes"], req.final_suggestions, ticket_id=req.ticket_id)
 
     # Upload redlined doc back to SharePoint
     upload_docx(cached["sharepoint_url"], updated_docx)

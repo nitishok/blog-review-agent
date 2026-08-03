@@ -14,7 +14,7 @@ from typing import Optional
 
 import anthropic
 
-from services.docx_service import extract_text
+from services.docx_service import extract_text, extract_blocks
 from services.jira import get_review_queue, get_sharepoint_url
 from services.sharepoint import fetch_docx
 
@@ -179,10 +179,12 @@ async def _pregenerate_ticket(ticket_id: str, ticket: dict):
             return
         docx_bytes = fetch_docx(sharepoint_url)
         doc_text = extract_text(docx_bytes)
+        blocks = extract_blocks(docx_bytes)
         suggestions = await asyncio.to_thread(generate_review, doc_text, ticket)
         _review_cache[ticket_id] = {
             "ticket": ticket,
             "original_text": doc_text,
+            "blocks": blocks,
             "suggestions": suggestions,
             "sharepoint_url": sharepoint_url,
             "docx_bytes": docx_bytes,

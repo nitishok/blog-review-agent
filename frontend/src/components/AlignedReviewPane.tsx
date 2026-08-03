@@ -1,8 +1,10 @@
+import { Block } from "../api";
 import CommentBubble from "./CommentBubble";
 import { SuggestionState } from "./BlogReviewView";
 
 interface Props {
   text: string;
+  blocks: Block[];
   suggestions: SuggestionState[];
   onUpdate: (index: number, value: string) => void;
   onAccept: (index: number) => void;
@@ -10,8 +12,11 @@ interface Props {
   onUndo: (index: number) => void;
 }
 
-export default function AlignedReviewPane({ text, suggestions, onUpdate, onAccept, onReject, onUndo }: Props) {
-  const paragraphs = text.split(/\n\n+/).filter(Boolean);
+export default function AlignedReviewPane({ text, blocks, suggestions, onUpdate, onAccept, onReject, onUndo }: Props) {
+  // Fall back to splitting original_text if no blocks provided
+  const rows: Block[] = blocks && blocks.length > 0
+    ? blocks
+    : text.split(/\n\n+/).filter(Boolean).map(t => ({ type: "paragraph" as const, text: t }));
 
   const findSuggestion = (para: string): { suggestion: SuggestionState; index: number } | null => {
     for (let i = 0; i < suggestions.length; i++) {
@@ -46,7 +51,21 @@ export default function AlignedReviewPane({ text, suggestions, onUpdate, onAccep
         <div className="aligned-col-header">Suggested</div>
       </div>
 
-      {paragraphs.map((para, i) => {
+      {rows.map((block, i) => {
+        if (block.type === "image") {
+          return (
+            <div key={i} className="aligned-row aligned-image-row">
+              <div className="aligned-left">
+                <img src={block.src} alt={block.alt || ""} className="doc-image" />
+              </div>
+              <div className="aligned-right">
+                <img src={block.src} alt={block.alt || ""} className="doc-image" />
+              </div>
+            </div>
+          );
+        }
+
+        const para = block.text || "";
         const match = findSuggestion(para);
         return (
           <div key={i} className={`aligned-row${match ? " has-suggestion" : ""}`}>

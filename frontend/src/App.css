@@ -114,6 +114,8 @@ body {
   overflow: hidden;
 }
 .topbar-ticket-id { font-size: 11px; color: #6c7086; font-weight: 700; flex-shrink: 0; }
+.topbar-ticket-link { text-decoration: none; }
+.topbar-ticket-link:hover { color: #cba6f7; text-decoration: underline; }
 .topbar-summary    { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .topbar-sp-link {
@@ -252,6 +254,17 @@ body {
   width: 230px;
   flex-shrink: 0;
   padding: 12px 12px 12px 0;
+}
+
+.aligned-image-row {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.doc-image {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  padding: 16px 24px;
 }
 
 /* Inline redline — matches Word document visual */

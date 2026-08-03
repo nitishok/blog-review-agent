@@ -17,10 +17,18 @@ export interface Suggestion {
   rationale: string;
 }
 
+export interface Block {
+  type: "paragraph" | "image";
+  text?: string;
+  src?: string;
+  alt?: string;
+}
+
 export interface Review {
   ticket_id: string;
   ticket: Ticket;
   original_text: string;
+  blocks: Block[];
   suggestions: Suggestion[];
   sharepoint_url: string;
 }

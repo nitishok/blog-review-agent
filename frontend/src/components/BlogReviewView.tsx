@@ -75,6 +75,7 @@ export default function BlogReviewView({ review, onBack }: Props) {
       <div className="review-body">
         <AlignedReviewPane
           text={review.original_text}
+          blocks={review.blocks || []}
           suggestions={suggestions}
           onUpdate={updateSuggestion}
           onAccept={acceptSuggestion}

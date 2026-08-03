@@ -10,7 +10,12 @@ export default function TopBar({ summary, ticketId, sharepointUrl, onBack }: Pro
     <div className="topbar">
       <button className="back-btn" onClick={onBack}>← Back</button>
       <div className="topbar-title">
-        <span className="topbar-ticket-id">{ticketId}</span>
+        <a
+          className="topbar-ticket-id topbar-ticket-link"
+          href={`https://princetonblue.atlassian.net/browse/${ticketId}`}
+          target="_blank"
+          rel="noreferrer"
+        >{ticketId}</a>
         <span className="topbar-summary">{summary}</span>
       </div>
       <a

@@ -10,6 +10,7 @@ Run boundaries are split to align with the original_text span so tracked
 changes are correctly scoped even when the text crosses multiple runs.
 """
 
+import base64
 import io
 from datetime import datetime, timezone
 from lxml import etree
@@ -25,6 +26,8 @@ from docx.opc.packuri import PackURI
 
 _W_NS   = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
+
+_HYPERLINK_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
 
 _COMMENTS_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
@@ -60,6 +63,64 @@ def extract_text(docx_bytes: bytes) -> str:
     return "\n\n".join(paras)
 
 
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+
+def extract_blocks(docx_bytes: bytes) -> list:
+    """
+    Extract document content as an ordered list of blocks:
+      {"type": "paragraph", "text": "..."}
+      {"type": "image", "src": "data:<mime>;base64,...", "alt": ""}
+
+    Green-coloured runs (our inserted suggestions) are excluded from paragraph
+    text so blocks always reflect the clean original content.
+    """
+    doc = Document(io.BytesIO(docx_bytes))
+
+    # Build a map of paragraph element id → image data URL
+    image_map: dict = {}
+    for shape in doc.inline_shapes:
+        blip = shape._inline.find(f'.//{{{_A_NS}}}blip')
+        if blip is None:
+            continue
+        rId = blip.get(f'{{{_R_NS}}}embed')
+        if not rId:
+            continue
+        img_part = doc.part.related_parts.get(rId)
+        if img_part is None:
+            continue
+        b64 = base64.b64encode(img_part.blob).decode()
+        src = f"data:{img_part.content_type};base64,{b64}"
+        # Walk up from the inline element to the parent w:p
+        elem = shape._inline
+        while elem is not None and elem.tag != qn("w:p"):
+            elem = elem.getparent()
+        if elem is not None:
+            image_map[id(elem)] = src
+
+    blocks = []
+    for para in doc.paragraphs:
+        p_id = id(para._p)
+        if p_id in image_map:
+            blocks.append({"type": "image", "src": image_map[p_id], "alt": ""})
+            continue
+        # Extract text, skipping green insertion runs
+        parts = []
+        for run in para.runs:
+            rPr = run._r.find(qn("w:rPr"))
+            if rPr is not None:
+                color_el = rPr.find(qn("w:color"))
+                if color_el is not None and color_el.get(qn("w:val"), "").upper() == "00B050":
+                    continue
+            parts.append(run.text)
+        text = "".join(parts).strip()
+        if text:
+            blocks.append({"type": "paragraph", "text": text})
+
+    return blocks
+
+
 def extract_paragraphs(docx_bytes: bytes) -> list:
     """Extract paragraphs with style info for structure-aware review."""
     doc = Document(io.BytesIO(docx_bytes))
@@ -92,10 +153,65 @@ def extract_existing_comments(docx_bytes: bytes) -> list:
     return comments
 
 
+def fill_jira_placeholder(doc: Document, ticket_id: str, jira_base_url: str) -> None:
+    """Find '[Jira Ticket: ]' in the document and replace it with a hyperlink."""
+    placeholder = "[Jira Ticket: ]"
+    url = f"{jira_base_url.rstrip('/')}/browse/{ticket_id}"
+
+    for para in doc.paragraphs:
+        if placeholder not in para.text:
+            continue
+
+        # Rebuild the paragraph replacing the placeholder with hyperlink + surrounding text
+        full_text = para.text
+        idx = full_text.index(placeholder)
+        before = full_text[:idx]
+        after = full_text[idx + len(placeholder):]
+
+        p_elem = para._p
+        for child in list(p_elem):
+            if child.tag != qn("w:pPr"):
+                p_elem.remove(child)
+
+        def _plain(text):
+            r = OxmlElement("w:r")
+            t = OxmlElement("w:t")
+            t.set(_XML_SPACE, "preserve")
+            t.text = text
+            r.append(t)
+            return r
+
+        if before:
+            p_elem.append(_plain(before))
+
+        # Add hyperlink element
+        r_id = para.part.relate_to(url, _HYPERLINK_REL, is_external=True)
+        hl = OxmlElement("w:hyperlink")
+        hl.set("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id", r_id)
+        hl_r = OxmlElement("w:r")
+        hl_rPr = OxmlElement("w:rPr")
+        hl_rStyle = OxmlElement("w:rStyle")
+        hl_rStyle.set(qn("w:val"), "Hyperlink")
+        hl_rPr.append(hl_rStyle)
+        hl_r.append(hl_rPr)
+        hl_t = OxmlElement("w:t")
+        hl_t.set(_XML_SPACE, "preserve")
+        hl_t.text = f"[Jira Ticket: {ticket_id}]"
+        hl_r.append(hl_t)
+        hl.append(hl_r)
+        p_elem.append(hl)
+
+        if after:
+            p_elem.append(_plain(after))
+        break
+
+
 def write_redlines(
     docx_bytes: bytes,
     suggestions: list,
     author: str = "BlogReviewAgent",
+    ticket_id: str = None,
+    jira_base_url: str = "https://princetonblue.atlassian.net",
 ) -> bytes:
     """
     Write review suggestions as visual redlines with rationale comments.
@@ -110,6 +226,9 @@ def write_redlines(
     """
     doc = Document(io.BytesIO(docx_bytes))
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if ticket_id:
+        fill_jira_placeholder(doc, ticket_id, jira_base_url)
 
     comments_root = _ensure_comments_part(doc)
     comment_id = _next_comment_id(comments_root)
@@ -150,7 +269,7 @@ def _apply_visual_redline(para, original_text: str, suggestion_text: str, cid: i
     Avoids w:del/w:ins tracked-change XML entirely; uses only standard w:rPr
     properties (w:color, w:strike, w:u) which Word Online handles correctly.
     """
-    full_text = para.text
+    full_text = _clean_para_text(para)
     if original_text not in full_text:
         return False
 
@@ -302,8 +421,24 @@ def _append_comment_element(root, cid: int, author: str, date: str, text: str):
     t.text = text
 
 
+def _clean_para_text(para) -> str:
+    """Return paragraph text excluding our redline-coloured runs (FF0000 / 00B050).
+    Use this instead of para.text when the doc may already have redlines applied."""
+    parts = []
+    for run in para.runs:
+        rPr = run._r.find(qn("w:rPr"))
+        if rPr is not None:
+            color_el = rPr.find(qn("w:color"))
+            if color_el is not None:
+                val = color_el.get(qn("w:val"), "").upper()
+                if val in ("FF0000", "00B050"):
+                    continue
+        parts.append(run.text)
+    return "".join(parts)
+
+
 def _find_paragraph(doc: Document, text: str):
     for para in doc.paragraphs:
-        if text in para.text:
+        if text in _clean_para_text(para):
             return para
     return None
