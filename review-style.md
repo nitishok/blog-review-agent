@@ -30,6 +30,10 @@
 - Vague intensifiers like "exactly" in CTAs ("See exactly how…" → "See how…")
 - Financial/valuation framing like "NPV" → use plain revenue language ("lost revenue", "revenue at risk") when describing business cost of delay
 - Adverbs that overstate AI autonomy ("autonomously") → let the described actions carry the meaning
+- Exact counts when a rounded form is more accurate or durable ("644+" → "hundreds of") — prefer plain-language scale descriptors over precise figures that may age poorly
+- "teams" as a generic audience label in CTAs → use the specific client relationship word ("clients") when referring to the people Princeton Blue serves
+- "process automation" alone when describing Princeton Blue's delivery work in contexts where AI project history is relevant → use "AI and process automation" to reflect the full scope of delivery
+- Adjective-led section headers that foreground the governance or maturity model over the capability itself ("Governed Agentic AI") → use plain noun phrase headers that name the concept directly ("AI Governance")
 
 ## Phrases CEO Prefers
 - "accelerate" (for speed outcomes)
@@ -39,6 +43,15 @@
 - "Agentic AI" (preferred term for AI agent capabilities in Appian context)
 - Outcome framing that pairs patient/human impact with business impact (e.g., "patients wait — and revenue is lost")
 - "lost revenue" over financial modeling terms like "NPV" when describing cost of delay to an executive audience
+- "clients" over "teams" when referring to Princeton Blue's customer relationships in CTAs and body copy
+- Pair "AI and automation" together when describing Princeton Blue's delivery work — not automation alone, particularly when recent AI project history is relevant
+- Use parenthetical asides to surface AI scope when it might otherwise be obscured by a broader label (e.g., "hundreds of process automation projects (including many with AI)")
+
+## Section Header Style
+- Prefer plain noun phrase headers that name the concept directly — avoid adjective-led constructions that foreground framing over substance
+  - Prefer: "AI Governance"
+  - Avoid: "Governed Agentic AI" (the adjective "Governed" front-loads a qualifier rather than naming the topic)
+- Let the body copy carry nuance (e.g., human oversight, governance guardrails) — the header should orient, not editorialize
 
 ## AI Agent Description Patterns
 - Describe AI agent actions in terms of specific, concrete tasks — not abstract categories
@@ -57,6 +70,9 @@
 - CTAs should end on curiosity or next step — not on the product claim
   - Prefer: "…and what it takes to get there"
   - Avoid: "…and what that means for your R&D pipeline" (over-explains the value; let the reader arrive there)
+- Use "clients" not "teams" when the CTA references Princeton Blue's customer relationships
+  - Prefer: "See how Princeton Blue has built this for life sciences clients"
+  - Avoid: "See how Princeton Blue has built this for life sciences teams"
 
 ---
 *This file is auto-updated by style_learner.py after each CEO approval session. Review git diff before committing updates.*

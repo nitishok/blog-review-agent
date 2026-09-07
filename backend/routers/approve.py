@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from services.docx_service import write_comments
 from services.jira import get_previous_assignee, get_previous_status, transition_ticket
+from services.local_blogs import is_local_mode, save_local_docx
 from services.review_agent import get_cached_review, invalidate_cache
 from services.sharepoint import upload_docx
 from services.style_learner import learn_from_approval
@@ -28,8 +29,11 @@ async def approve(req: ApproveRequest):
     # Write suggestions as Word comments into the doc
     updated_docx = write_comments(cached["docx_bytes"], req.final_suggestions, ticket_id=req.ticket_id)
 
-    # Upload redlined doc back to SharePoint
-    upload_docx(cached["sharepoint_url"], updated_docx)
+    # Upload redlined doc (or save locally in test mode)
+    if is_local_mode():
+        save_local_docx(req.ticket_id, updated_docx)
+    else:
+        upload_docx(cached["sharepoint_url"], updated_docx)
 
     # Learn from differences between agent suggestions and final edits
     learn_from_approval(cached["suggestions"], req.final_suggestions)

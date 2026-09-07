@@ -16,6 +16,7 @@ import anthropic
 
 from services.docx_service import extract_text, extract_blocks
 from services.jira import get_review_queue, get_sharepoint_url
+from services.local_blogs import is_local_mode, get_local_queue, get_local_docx
 from services.sharepoint import fetch_docx
 
 # In-memory cache: ticket_id -> review result
@@ -162,7 +163,7 @@ Ticket: {ticket_context.get('id', 'N/A')} — {ticket_context.get('summary', '')
 async def pregenerate_queue():
     """Eagerly pre-generate reviews for all tickets in the review queue."""
     try:
-        tickets = get_review_queue()
+        tickets = get_local_queue() if is_local_mode() else get_review_queue()
         for ticket in tickets:
             ticket_id = ticket["id"]
             if ticket_id not in _review_cache:
@@ -173,11 +174,15 @@ async def pregenerate_queue():
 
 async def _pregenerate_ticket(ticket_id: str, ticket: dict):
     try:
-        sharepoint_url = get_sharepoint_url(ticket_id)
-        if not sharepoint_url:
-            _review_cache[ticket_id] = {"error": "No SharePoint URL found in ticket"}
-            return
-        docx_bytes = fetch_docx(sharepoint_url)
+        if is_local_mode():
+            docx_bytes = get_local_docx(ticket_id)
+            sharepoint_url = ""
+        else:
+            sharepoint_url = get_sharepoint_url(ticket_id)
+            if not sharepoint_url:
+                _review_cache[ticket_id] = {"error": "No SharePoint URL found in ticket"}
+                return
+            docx_bytes = fetch_docx(sharepoint_url)
         doc_text = extract_text(docx_bytes)
         blocks = extract_blocks(docx_bytes)
         suggestions = await asyncio.to_thread(generate_review, doc_text, ticket)

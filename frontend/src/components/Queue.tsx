@@ -13,7 +13,7 @@ export default function Queue({ onSelect, selectedId }: Props) {
   useEffect(() => {
     const load = () =>
       getQueue()
-        .then(all => setTickets(all.filter(t => t.summary.toLowerCase().includes("blog"))))
+        .then(all => setTickets(all.filter(t => t.summary.toLowerCase().includes("new blog"))))
         .finally(() => setLoading(false));
     load();
     const interval = setInterval(load, 15000);

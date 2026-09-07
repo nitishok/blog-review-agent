@@ -27,8 +27,6 @@ from docx.opc.packuri import PackURI
 _W_NS   = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
 
-_HYPERLINK_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
-
 _COMMENTS_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
 )
@@ -42,22 +40,14 @@ _COMMENTS_REL_TYPE = (
 def extract_text(docx_bytes: bytes) -> str:
     """
     Extract original text from a .docx, preserving paragraph breaks.
-    Skips runs coloured 00B050 (green) — those are our inserted suggestions
-    so the extracted text reflects the pre-redline content even when the
-    SharePoint document already has our visual redlines applied.
+    Skips w:ins elements (our tracked-change insertions) so the extracted
+    text reflects the pre-redline original even when the doc already has
+    tracked changes applied.
     """
     doc = Document(io.BytesIO(docx_bytes))
     paras = []
     for p in doc.paragraphs:
-        parts = []
-        for run in p.runs:
-            rPr = run._r.find(qn("w:rPr"))
-            if rPr is not None:
-                color_el = rPr.find(qn("w:color"))
-                if color_el is not None and color_el.get(qn("w:val"), "").upper() == "00B050":
-                    continue  # skip our inserted suggestion text
-            parts.append(run.text)
-        text = "".join(parts).strip()
+        text = _original_para_text(p._p).strip()
         if text:
             paras.append(text)
     return "\n\n".join(paras)
@@ -105,16 +95,8 @@ def extract_blocks(docx_bytes: bytes) -> list:
         if p_id in image_map:
             blocks.append({"type": "image", "src": image_map[p_id], "alt": ""})
             continue
-        # Extract text, skipping green insertion runs
-        parts = []
-        for run in para.runs:
-            rPr = run._r.find(qn("w:rPr"))
-            if rPr is not None:
-                color_el = rPr.find(qn("w:color"))
-                if color_el is not None and color_el.get(qn("w:val"), "").upper() == "00B050":
-                    continue
-            parts.append(run.text)
-        text = "".join(parts).strip()
+        # Extract text, skipping w:ins (our tracked insertions)
+        text = _original_para_text(para._p).strip()
         if text:
             blocks.append({"type": "paragraph", "text": text})
 
@@ -170,7 +152,7 @@ def fill_jira_placeholder(doc: Document, ticket_id: str, jira_base_url: str) -> 
 
         p_elem = para._p
         for child in list(p_elem):
-            if child.tag != qn("w:pPr"):
+            if child.tag in (qn("w:r"), qn("w:hyperlink")):
                 p_elem.remove(child)
 
         def _plain(text):
@@ -184,22 +166,7 @@ def fill_jira_placeholder(doc: Document, ticket_id: str, jira_base_url: str) -> 
         if before:
             p_elem.append(_plain(before))
 
-        # Add hyperlink element
-        r_id = para.part.relate_to(url, _HYPERLINK_REL, is_external=True)
-        hl = OxmlElement("w:hyperlink")
-        hl.set("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id", r_id)
-        hl_r = OxmlElement("w:r")
-        hl_rPr = OxmlElement("w:rPr")
-        hl_rStyle = OxmlElement("w:rStyle")
-        hl_rStyle.set(qn("w:val"), "Hyperlink")
-        hl_rPr.append(hl_rStyle)
-        hl_r.append(hl_rPr)
-        hl_t = OxmlElement("w:t")
-        hl_t.set(_XML_SPACE, "preserve")
-        hl_t.text = f"[Jira Ticket: {ticket_id}]"
-        hl_r.append(hl_t)
-        hl.append(hl_r)
-        p_elem.append(hl)
+        p_elem.append(_plain(f"[Jira Ticket: {ticket_id}]"))
 
         if after:
             p_elem.append(_plain(after))
@@ -214,41 +181,30 @@ def write_redlines(
     jira_base_url: str = "https://princetonblue.atlassian.net",
 ) -> bytes:
     """
-    Write review suggestions as visual redlines with rationale comments.
-
-    For each suggestion:
-      - original_text rendered in red with strikethrough
-      - suggestion text rendered in green with underline
-      - rationale written as a Word comment anchored to the change
-
-    Uses standard run character formatting (w:color, w:strike, w:u) rather than
-    tracked-change XML (w:del/w:ins) for full Word Online compatibility.
+    Write review suggestions as native Word tracked changes (w:del / w:ins).
+    Compatible with both Word Desktop and Word Online.
     """
     doc = Document(io.BytesIO(docx_bytes))
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     if ticket_id:
         fill_jira_placeholder(doc, ticket_id, jira_base_url)
 
-    comments_root = _ensure_comments_part(doc)
-    comment_id = _next_comment_id(comments_root)
+    # Start revision IDs above the highest existing ID in the document
+    rev_id = _max_revision_id(doc) + 1
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for suggestion in suggestions:
-        original  = suggestion.get("original_text", "").strip()
-        new_text  = suggestion.get("suggestion", "")
-        rationale = suggestion.get("rationale", "")
+        original = suggestion.get("original_text", "").strip()
+        new_text = suggestion.get("suggestion", "")
         if not original:
             continue
-
         para = _find_paragraph(doc, original)
         if para is None:
             continue
+        applied = _apply_tracked_change(para, original, new_text, rev_id, author, now)
+        if applied:
+            rev_id += 2  # each change uses two IDs: one for del, one for ins
 
-        _append_comment_element(comments_root, comment_id, author, now, rationale)
-        _apply_visual_redline(para, original, new_text, comment_id)
-        comment_id += 1
-
-    _flush_comments_part(doc, comments_root)
     output = io.BytesIO()
     doc.save(output)
     return output.getvalue()
@@ -258,47 +214,54 @@ def write_redlines(
 write_comments = write_redlines
 
 
-# ── Visual redline (color formatting — Word Online safe) ──────────────────────
+# ── Native tracked changes (w:del / w:ins) ────────────────────────────────────
 
-def _apply_visual_redline(para, original_text: str, suggestion_text: str, cid: int):
-    """
-    Rewrite the paragraph in place:
-      [before] [red strikethrough: original] [space] [green underline: suggestion] [after]
-    with a comment range wrapping the changed portion.
+def _max_revision_id(doc: Document) -> int:
+    """Scan the full document XML for the highest w:id value to avoid conflicts."""
+    max_id = 0
+    for elem in doc.element.iter():
+        val = elem.get(qn("w:id"))
+        if val is not None:
+            try:
+                max_id = max(max_id, int(val))
+            except ValueError:
+                pass
+    return max_id
 
-    Avoids w:del/w:ins tracked-change XML entirely; uses only standard w:rPr
-    properties (w:color, w:strike, w:u) which Word Online handles correctly.
+
+def _apply_tracked_change(
+    para, original_text: str, suggestion_text: str,
+    rev_id: int, author: str, date: str
+) -> bool:
     """
-    full_text = _clean_para_text(para)
+    Replace original_text with a tracked change in the paragraph:
+      w:del  — marks original_text as deleted (Word shows red strikethrough)
+      w:ins  — marks suggestion_text as inserted (Word shows underline)
+
+    Uses w:delText inside w:del and w:t inside w:ins, as required by the OOXML spec.
+    Both elements carry unique w:id, w:author, and w:date attributes.
+    """
+    full_text = _original_para_text(para._p)
     if original_text not in full_text:
         return False
 
-    idx   = full_text.index(original_text)
+    idx    = full_text.index(original_text)
     before = full_text[:idx]
     after  = full_text[idx + len(original_text):]
 
     p_elem = para._p
 
-    # Clear all content children; preserve paragraph properties (w:pPr)
+    # Remove runs and any existing tracked-change elements; keep structural nodes
     for child in list(p_elem):
-        if child.tag != qn("w:pPr"):
+        if child.tag in (
+            qn("w:r"), qn("w:hyperlink"),
+            qn("w:ins"), qn("w:del"),
+            qn("w:commentRangeStart"), qn("w:commentRangeEnd"),
+        ):
             p_elem.remove(child)
 
-    def _run(text: str, color: str = None, strike: bool = False, underline: bool = False):
+    def _plain_run(text: str) -> "OxmlElement":
         r = OxmlElement("w:r")
-        if color or strike or underline:
-            rPr = OxmlElement("w:rPr")
-            if color:
-                c = OxmlElement("w:color")
-                c.set(qn("w:val"), color)
-                rPr.append(c)
-            if strike:
-                rPr.append(OxmlElement("w:strike"))
-            if underline:
-                u = OxmlElement("w:u")
-                u.set(qn("w:val"), "single")
-                rPr.append(u)
-            r.append(rPr)
         t = OxmlElement("w:t")
         t.set(_XML_SPACE, "preserve")
         t.text = text
@@ -306,41 +269,36 @@ def _apply_visual_redline(para, original_text: str, suggestion_text: str, cid: i
         return r
 
     if before:
-        p_elem.append(_run(before))
+        p_elem.append(_plain_run(before))
 
-    # Comment range start
-    cstart = OxmlElement("w:commentRangeStart")
-    cstart.set(qn("w:id"), str(cid))
-    p_elem.append(cstart)
+    # w:del — deleted (original) text
+    del_elem = OxmlElement("w:del")
+    del_elem.set(qn("w:id"),     str(rev_id))
+    del_elem.set(qn("w:author"), author)
+    del_elem.set(qn("w:date"),   date)
+    del_r = OxmlElement("w:r")
+    del_t = OxmlElement("w:delText")
+    del_t.set(_XML_SPACE, "preserve")
+    del_t.text = original_text
+    del_r.append(del_t)
+    del_elem.append(del_r)
+    p_elem.append(del_elem)
 
-    # Original text: red + strikethrough
-    p_elem.append(_run(original_text, color="FF0000", strike=True))
-
-    # Separator
-    p_elem.append(_run("  "))
-
-    # Suggestion: green + underline
-    p_elem.append(_run(suggestion_text, color="00B050", underline=True))
-
-    # Comment range end
-    cend = OxmlElement("w:commentRangeEnd")
-    cend.set(qn("w:id"), str(cid))
-    p_elem.append(cend)
-
-    # Comment reference run (rStyle required by Word Online)
-    cref_run = OxmlElement("w:r")
-    cref_rPr = OxmlElement("w:rPr")
-    cref_rStyle = OxmlElement("w:rStyle")
-    cref_rStyle.set(qn("w:val"), "CommentReference")
-    cref_rPr.append(cref_rStyle)
-    cref_run.append(cref_rPr)
-    cref = OxmlElement("w:commentReference")
-    cref.set(qn("w:id"), str(cid))
-    cref_run.append(cref)
-    p_elem.append(cref_run)
+    # w:ins — inserted (suggestion) text
+    ins_elem = OxmlElement("w:ins")
+    ins_elem.set(qn("w:id"),     str(rev_id + 1))
+    ins_elem.set(qn("w:author"), author)
+    ins_elem.set(qn("w:date"),   date)
+    ins_r = OxmlElement("w:r")
+    ins_t = OxmlElement("w:t")
+    ins_t.set(_XML_SPACE, "preserve")
+    ins_t.text = suggestion_text
+    ins_r.append(ins_t)
+    ins_elem.append(ins_r)
+    p_elem.append(ins_elem)
 
     if after:
-        p_elem.append(_run(after))
+        p_elem.append(_plain_run(after))
 
     return True
 
@@ -370,7 +328,11 @@ def _get_comments_part(doc: Document, create: bool = True):
 
 
 def _ensure_comments_part(doc: Document):
-    return etree.fromstring(_get_comments_part(doc, create=True).blob)
+    root = etree.fromstring(_get_comments_part(doc, create=True).blob)
+    # Clear any existing comments so stale ones don't accumulate across approvals
+    for existing in list(root):
+        root.remove(existing)
+    return root
 
 
 def _flush_comments_part(doc: Document, root):
@@ -421,24 +383,37 @@ def _append_comment_element(root, cid: int, author: str, date: str, text: str):
     t.text = text
 
 
-def _clean_para_text(para) -> str:
-    """Return paragraph text excluding our redline-coloured runs (FF0000 / 00B050).
-    Use this instead of para.text when the doc may already have redlines applied."""
+def _original_para_text(p_elem) -> str:
+    """
+    Extract the original (pre-suggestion) text from a paragraph element.
+    - Includes w:del text (w:delText) — that IS the original
+    - Skips w:ins content — that is our inserted suggestion
+    - Includes plain w:r runs
+    """
     parts = []
-    for run in para.runs:
-        rPr = run._r.find(qn("w:rPr"))
-        if rPr is not None:
-            color_el = rPr.find(qn("w:color"))
-            if color_el is not None:
-                val = color_el.get(qn("w:val"), "").upper()
-                if val in ("FF0000", "00B050"):
-                    continue
-        parts.append(run.text)
+    for child in p_elem:
+        tag = child.tag
+        if tag == qn("w:r"):
+            # Plain run — include unless it is inside w:ins (handled below)
+            for t in child.findall(qn("w:t")):
+                parts.append(t.text or "")
+            for t in child.findall(qn("w:delText")):
+                parts.append(t.text or "")
+        elif tag == qn("w:del"):
+            # Deleted text = original — include it
+            for t in child.iter(qn("w:delText")):
+                parts.append(t.text or "")
+        elif tag == qn("w:ins"):
+            # Inserted text = our suggestion — skip entirely
+            pass
+        elif tag == qn("w:hyperlink"):
+            for t in child.iter(qn("w:t")):
+                parts.append(t.text or "")
     return "".join(parts)
 
 
 def _find_paragraph(doc: Document, text: str):
     for para in doc.paragraphs:
-        if text in _clean_para_text(para):
+        if text in _original_para_text(para._p):
             return para
     return None
